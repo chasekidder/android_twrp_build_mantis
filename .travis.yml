@@ -1,0 +1,80 @@
+os: linux
+dist: focal
+group: edge
+language: generic
+git:
+  depth: 1
+addons:
+  apt:
+    update:
+      - true
+    packages:
+      - xz-utils
+services:
+  - docker
+before_install:
+  - echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin 2>/dev/null
+  - docker pull fr3akyphantom/droid-builder:latest
+before_script:
+  # Configuration Environment Variables
+  - LOCAL_MANIFEST_URL="https://raw.githubusercontent.com/chasekidder/android_twrp_build_mantis/main/custom.xml"
+  - DEVICE_TREE_REPO_URL="https://github.com/chaosmaster/android_device_amazon_mantis.git"
+  - DEVICE_TREE_DIR="device/amazon/mantis"
+  - DEVICE_CODENAME="mantis"
+  - BUILD_FLAVOR="eng"
+
+  # Create working directory
+  - cd $HOME && mkdir twrp
+  
+  # Initialize Omnirom TWRP repo and add custom manifest
+  - repo init --depth=1 -u git://github.com/minimal-manifest-twrp/platform_manifest_twrp_omni.git -b twrp-9.0
+  - mkdir .repo/local_manifests && curl -sL ${LOCAL_MANIFEST_URL} -o $HOME/twrp/.repo/local_manifests/custom.py
+  - repo sync
+
+  # Patch roomservice.py to allow local builds
+  - find build/tools -maxdepth 2 -type f -name "roomservice.py" -exec rm -rf {} \; 2>/dev/null
+  - find vendor/omni/build/tools -maxdepth 2 -type f -name "roomservice.py" -exec rm -rf {} \; 2>/dev/null
+  - curl -sL https://gist.github.com/rokibhasansagar/247ddd4ef00dcc9d3340397322051e6a/raw/roomservice_90.py -o vendor/omni/build/tools/roomservice.py
+
+  # Bodge a fix for the docker permissions issues
+  - chmod -R 777 $HOME/twrp
+  
+script:
+  # Clone the device tree
+  - cd $HOME/twrp/ && git clone ${DEVICE_TREE_REPO_URL} ${DEVICE_TREE_DIR}
+
+  # Start the build process in docker
+  - |
+    docker run --rm -i -v "$(pwd):/home/builder/twrp/:rw,z" -v "${HOME}/.ccache:/srv/ccache:rw,z" fr3akyphantom/droid-builder bash << EOF
+    cd /home/builder/twrp/
+    source build/envsetup.sh
+    BUILD_FLAVOR=${BUILD_FLAVOR}
+    lunch omni_${DEVICE_CODENAME}-${BUILD_FLAVOR}
+    make -j$(nproc --all) recoveryimage
+    exit
+    EOF
+
+after_success:
+  # Set the image version info
+  - export version=$(cat bootable/recovery/variables.h | grep "define TW_MAIN_VERSION_STR" | cut -d '"' -f2)
+  - cp $HOME/twrp/out/target/product/mantis/recovery.img $HOME/twrp/TWRP-$version-mantis-$(date +"%Y%m%d")-Unofficial.img
+  - cd $HOME/twrp/
+  # Optional: You might need to switch from https://transfer.sh to https://file.io
+  # - curl -s --upload-file TWRP-$version-mantis-$(date +"%Y%m%d")-Unofficial.img https://transfer.sh/ && echo ""
+
+deploy:
+  provider: releases
+  token: $GitOAUTHToken
+  cleanup: false
+  file_glob: true
+  file: $HOME/twrp/*.img
+  on:
+    tags: false # Set "true" to deploy only on successful tagged commit builds
+    repo: chasekidder/android_twrp_build_mantis # Optional: If you want to deploy on different repository
+    branch: main # Optional: Needs to be exact as the config branch
+branches:
+  only:
+    - main # Set travis builder branch(es) names
+  except:
+    - /^(?i:untagged)-.*$/
+    - /^v\d+\.\d+(\.\d+)?(-\S*)?$/
