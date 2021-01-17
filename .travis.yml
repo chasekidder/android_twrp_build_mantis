@@ -11,7 +11,7 @@ addons:
     packages:
       - xz-utils
   snaps:
-       - git-repo
+      - git-repo
 services:
   - docker
 before_install:
@@ -26,7 +26,7 @@ before_script:
   - BUILD_FLAVOR="eng"
 
   # Create working directory
-  - cd $HOME && mkdir twrp
+  - cd $HOME && mkdir twrp && cd twrp
   
   # Initialize Omnirom TWRP repo and add custom manifest
   - repo init --depth=1 -u git://github.com/minimal-manifest-twrp/platform_manifest_twrp_omni.git -b twrp-9.0
