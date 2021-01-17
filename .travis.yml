@@ -9,7 +9,7 @@ addons:
     update:
       - true
     packages:
-      - git-repo
+      - repo
       - xz-utils
 services:
   - docker
